@@ -203,6 +203,10 @@
     .flip-inner.flipped { transform: rotateY(180deg); }
     .face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 26px; padding: 22px; display: flex; flex-direction: column; justify-content: space-between; border: 2px solid var(--border); background: var(--surface); box-shadow: var(--shadow); }
     .face.back { transform: rotateY(180deg); border-color: var(--green); background: linear-gradient(135deg, var(--green-soft), var(--indigo-soft)); }
+    /* iPad: die gerade unsichtbare Kartenseite darf keine Fingertipps abfangen */
+    .flip-wrap { touch-action: manipulation; }
+    .flip-inner:not(.flipped) .face.back, .flip-inner.flipped .face:not(.back) { pointer-events: none; }
+    .flip-inner.flipped .face.back, .flip-inner:not(.flipped) .face:not(.back) { pointer-events: auto; }
     .face .mid { text-align: center; margin: auto 0; display: flex; flex-direction: column; gap: 12px; align-items: center; }
 
     .quiz-opts { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
@@ -417,8 +421,8 @@
         </div>
         <button class="btn lg block indigo" id="fcFlipBtn" onclick="app.flipCard()">🔄 Umdrehen <span class="tiny" style="opacity:.75">(Leertaste)</span></button>
         <div class="grid g2 hidden" id="fcRateBtns">
-          <button class="btn lg soft-rose" onclick="app.rateFlashcard(false)">❌ Nochmal üben</button>
-          <button class="btn lg primary" onclick="app.rateFlashcard(true)">✅ Gewusst!</button>
+          <button type="button" class="btn lg soft-rose" onclick="app.rateFlashcard(false)">❌ Nochmal üben</button>
+          <button type="button" class="btn lg primary" onclick="app.rateFlashcard(true)">✅ Gewusst!</button>
         </div>
       </div>
 
@@ -1948,7 +1952,7 @@ const DEFAULT_UNITS_MORE3 = [
        Alle Daten bleiben lokal (localStorage). Keine externen Dienste,
        außer der optionalen Foto-Texterkennung (Tesseract, nur bei Bedarf).
        ===================================================================== */
-    const APP_VERSION = '3.4';
+    const APP_VERSION = '3.5';
     const STORAGE_KEY = 'vokabeltrainer_v3';
     const LEGACY_KEYS = ['more4_vokabeltrainer_v2', 'more4_vokabeltrainer_v1'];
     const BOX_DAYS = [0, 1, 3, 7, 14, 30];   // Lernkartei: Fach -> Tage bis zur nächsten Wiederholung
@@ -2146,6 +2150,9 @@ const DEFAULT_UNITS_MORE3 = [
         this.loadVoices();
         this.bindKeys();
         this.requestPersistence();
+        const unlock = () => { this.unlockSpeech(); document.removeEventListener('touchend', unlock, true); document.removeEventListener('click', unlock, true); };
+        document.addEventListener('touchend', unlock, true);
+        document.addEventListener('click', unlock, true);
         $('versionInfo').textContent = `Vokabeltrainer ${APP_VERSION}`;
         if (window.matchMedia) {
           window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => this.applyTheme());
@@ -2594,7 +2601,7 @@ const DEFAULT_UNITS_MORE3 = [
         $('studyProgress').classList.remove('hidden');
 
         const card = s.cards[s.idx];
-        s.flipped = false; s.answered = false; s.hint = 0; s.snapshot = null;
+        s.flipped = false; s.revealed = false; s.answered = false; s.hint = 0; s.snapshot = null;
         if (!keepDirection) s.dir = p.direction === 'mixed' ? (Math.random() < 0.5 ? 'en-de' : 'de-en') : p.direction;
 
         $('progText').textContent = `Karte ${s.idx + 1} von ${total}`;
@@ -2713,13 +2720,19 @@ const DEFAULT_UNITS_MORE3 = [
         if (!s || this.profile().mode !== 'flashcards' || s.idx >= s.cards.length) return;
         s.flipped = !s.flipped;
         $('flipInner').classList.toggle('flipped', s.flipped);
-        if (s.flipped) { $('fcFlipBtn').classList.add('hidden'); $('fcRateBtns').classList.remove('hidden'); }
-        if (s.flipped && s.dir === 'de-en' && this.state.settings.autoSpeak) setTimeout(() => this.speakText(s.cards[s.idx].en), 250);
+        if (s.flipped && !s.revealed) {
+          // einmal aufgedeckt = bewertbar, auch wenn die Karte danach wieder zurückgedreht wird
+          s.revealed = true;
+          $('fcFlipBtn').classList.add('hidden');
+          $('fcRateBtns').classList.remove('hidden');
+          if (s.dir === 'de-en' && this.state.settings.autoSpeak) this.speakText(s.cards[s.idx].en);
+        }
       },
 
       rateFlashcard(known) {
         const s = this.session;
-        if (!s || !s.flipped) return;
+        if (!s || s.idx >= s.cards.length) return;
+        if (!s.revealed) { this.flipCard(); return; }
         this.grade(s.cards[s.idx], known);
         this.nextCard();
       },
@@ -2906,6 +2919,7 @@ const DEFAULT_UNITS_MORE3 = [
         const load = () => { this.voices = speechSynthesis.getVoices().filter(v => /^en[-_]/i.test(v.lang)); if (this.view === 'settings') this.renderVoiceSelect(); };
         load();
         speechSynthesis.onvoiceschanged = load;
+        if (!this.voices.length) [300, 1000, 2500].forEach(ms => setTimeout(() => { if (!this.voices.length) load(); }, ms));
       },
 
       pickVoice() {
@@ -2919,7 +2933,7 @@ const DEFAULT_UNITS_MORE3 = [
           if (lang === acc) sc += 10;
           if (/enhanced|premium|erweitert|neural|natural/i.test(v.name + ' ' + v.voiceURI)) sc += 5;
           if (v.localService) sc += 2;
-          if (/novelty|whisper|bells|bubbles|cellos|zarvox|trinoids|organ|jester|bad news|good news|boing|albert|superstar|wobble/i.test(v.name)) sc -= 20;
+          if (/novelty|whisper|bells|bubbles|cellos|zarvox|trinoids|organ|jester|bad news|good news|boing|albert|superstar|wobble|eddy|flo|grandma|grandpa|reed|rocko|sandy|shelley|eloquence/i.test(v.name + ' ' + v.voiceURI)) sc -= 20;
           if (sc > bestScore) { bestScore = sc; best = v; }
         });
         return best;
@@ -2936,26 +2950,61 @@ const DEFAULT_UNITS_MORE3 = [
         this.speakText(what === 'both' && c.ex ? `${word}. ${c.ex}` : word, btn, true);
       },
 
+      /** iPad: Sprachausgabe muss einmal direkt durch einen Fingertipp „freigeschaltet“ werden */
+      unlockSpeech() {
+        if (this._speechUnlocked || !('speechSynthesis' in window)) return;
+        this._speechUnlocked = true;
+        try {
+          const u = new SpeechSynthesisUtterance(' ');
+          u.volume = 0;
+          speechSynthesis.speak(u);
+        } catch (_) {}
+      },
+
       speakText(text, btn = null, alreadyClean = false) {
         if (!('speechSynthesis' in window)) { this.toast('Sprachausgabe wird hier nicht unterstützt.', 'error'); return; }
         const t = alreadyClean ? text : this.cleanSpeech(text);
         if (!t) return;
-        this.stopSpeech();
-        const u = new SpeechSynthesisUtterance(t);
-        u.lang = this.state.settings.accent;
-        u.rate = this.state.settings.speechRate || 0.8;
-        const v = this.pickVoice();
-        if (v) u.voice = v;
-        const done = () => { if (btn) btn.classList.remove('speaking'); clearTimeout(this._speakTimer); };
-        u.onend = done; u.onerror = done;
-        if (btn) btn.classList.add('speaking');
-        // iOS meldet das Ende nicht immer zuverlässig
-        this._speakTimer = setTimeout(done, 1500 + t.length * 140 / (u.rate || 1));
-        speechSynthesis.speak(u);
+        this._speechUnlocked = true;
+        const synth = window.speechSynthesis;
+        const busy = synth.speaking || synth.pending;
+        document.querySelectorAll('.speaking').forEach(b => b.classList.remove('speaking'));
+        clearTimeout(this._speakTimer);
+        clearTimeout(this._speakDelay);
+
+        const go = (useVoice) => {
+          const u = new SpeechSynthesisUtterance(t);
+          u.lang = this.state.settings.accent;
+          u.rate = this.state.settings.speechRate || 0.8;
+          const v = useVoice ? this.pickVoice() : null;
+          if (v) u.voice = v;
+          this._utter = u;   // Referenz halten – sonst bricht iOS die Ausgabe manchmal ab
+          const done = () => { if (btn) btn.classList.remove('speaking'); clearTimeout(this._speakTimer); };
+          u.onend = done;
+          u.onerror = (ev) => {
+            done();
+            const err = ev && ev.error;
+            // mit gewählter Stimme gescheitert → einmal mit Standardstimme versuchen
+            if (v && err !== 'interrupted' && err !== 'canceled') go(false);
+          };
+          if (btn) btn.classList.add('speaking');
+          this._speakTimer = setTimeout(done, 2000 + t.length * 150 / (u.rate || 1));
+          try { synth.resume(); } catch (_) {}
+          synth.speak(u);
+        };
+
+        if (busy) {
+          // laufende Ausgabe stoppen und kurz warten – sofortiges speak() nach cancel() verschluckt Safari
+          try { synth.cancel(); } catch (_) {}
+          this._speakDelay = setTimeout(() => go(true), 150);
+        } else {
+          go(true);   // direkt im Fingertipp aufrufen (wichtig für iPad)
+        }
       },
 
       stopSpeech() {
-        try { if ('speechSynthesis' in window) speechSynthesis.cancel(); } catch (_) {}
+        clearTimeout(this._speakDelay);
+        try { if ('speechSynthesis' in window && (speechSynthesis.speaking || speechSynthesis.pending)) speechSynthesis.cancel(); } catch (_) {}
         document.querySelectorAll('.speaking').forEach(b => b.classList.remove('speaking'));
       },
 
@@ -4048,9 +4097,9 @@ const DEFAULT_UNITS_MORE3 = [
           if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
           const mode = this.profile().mode;
           if (mode === 'flashcards') {
-            if (e.code === 'Space' || e.key === 'Enter') { e.preventDefault(); if (!this.session.flipped) this.flipCard(); }
-            else if (this.session.flipped && (e.key === 'ArrowRight' || e.key === '2')) { e.preventDefault(); this.rateFlashcard(true); }
-            else if (this.session.flipped && (e.key === 'ArrowLeft' || e.key === '1')) { e.preventDefault(); this.rateFlashcard(false); }
+            if (e.code === 'Space' || e.key === 'Enter') { e.preventDefault(); this.flipCard(); }
+            else if (this.session.revealed && (e.key === 'ArrowRight' || e.key === '2')) { e.preventDefault(); this.rateFlashcard(true); }
+            else if (this.session.revealed && (e.key === 'ArrowLeft' || e.key === '1')) { e.preventDefault(); this.rateFlashcard(false); }
           } else if (mode === 'quiz') {
             if (/^[1-4]$/.test(e.key)) { const b = document.querySelectorAll('.quiz-opt')[Number(e.key) - 1]; if (b && !b.disabled) b.click(); }
             else if (e.key === 'Enter' && this.session.answered) { e.preventDefault(); this.nextCard(); }
