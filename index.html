@@ -538,6 +538,8 @@
             </label>
             <p class="tiny muted">Funktioniert mit Vokabeltabellen (Englisch · Beispielsatz · Deutsch) und mit Bildseiten, auf denen nur englische Wörter stehen – die Übersetzung wird dann ergänzt. Mehrere Fotos auf einmal sind möglich. Danach kannst du alles in einer Tabelle prüfen.</p>
             <div class="tiny muted" id="ocrStatus" style="font-weight:700;color:var(--indigo)"></div>
+            <button class="btn soft-indigo block" onclick="app.copyGeminiPrompt()">📋 Anweisung für Gemini-App kopieren</button>
+            <p class="tiny muted" style="margin-top:-4px">Ohne Schlüssel: Foto in der Gemini-App auslesen lassen und die Antwort unten einfügen.</p>
             <div class="banner info">
               <div style="font-size:20px">⌨️</div>
               <div class="grow">
@@ -646,6 +648,7 @@
         <input type="password" id="aiKeyInput" placeholder="Schlüssel einfügen (beginnt meist mit „AIza…“)" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
         <div class="row wrap">
           <button class="btn primary" onclick="app.saveAiKey()">Speichern &amp; testen</button>
+          <button class="btn sm" onclick="app.aiDiagnose()">🩺 Verbindung prüfen</button>
           <button class="btn sm ghost" onclick="app.showAiHelp()">❓ Wie bekomme ich einen Schlüssel?</button>
           <button class="btn sm ghost hidden" id="aiRemoveBtn" onclick="app.removeAiKey()">Schlüssel entfernen</button>
         </div>
@@ -1945,7 +1948,7 @@ const DEFAULT_UNITS_MORE3 = [
        Alle Daten bleiben lokal (localStorage). Keine externen Dienste,
        außer der optionalen Foto-Texterkennung (Tesseract, nur bei Bedarf).
        ===================================================================== */
-    const APP_VERSION = '3.3';
+    const APP_VERSION = '3.4';
     const STORAGE_KEY = 'vokabeltrainer_v3';
     const LEGACY_KEYS = ['more4_vokabeltrainer_v2', 'more4_vokabeltrainer_v1'];
     const BOX_DAYS = [0, 1, 3, 7, 14, 30];   // Lernkartei: Fach -> Tage bis zur nächsten Wiederholung
@@ -3199,11 +3202,12 @@ const DEFAULT_UNITS_MORE3 = [
         const kept = [];
         lines.forEach(raw => {
           let l = raw
+            .replace(/\*\*|__/g, '')
             .replace(/^\s*(?:[•·*▪►\-–]|\d{1,3}[.)])\s+/, '')
             .replace(/\[([^\]]{1,50})\]/g, (m, inner) => IPA.test(inner) ? '\t' : m)
             .replace(/\/([^\/]{1,50})\//g, (m, inner) => IPA.test(inner) ? '\t' : m)
             .trim();
-          if (!l || /^\d+$/.test(l) || /^(unit|page|seite|p\.)\s*\d+\b/i.test(l)) return;
+          if (!l || /^```/.test(l) || /^\d+$/.test(l) || /^(unit|page|seite|p\.)\s*\d+\b/i.test(l)) return;
           kept.push(l.replace(/\t+/g, '\t').replace(/^\t|\t$/g, ''));
         });
         kept.forEach(l => {
@@ -3400,8 +3404,14 @@ const DEFAULT_UNITS_MORE3 = [
         try {
           for (let i = 0; i < files.length; i++) {
             st.textContent = `✨ Foto ${i + 1} von ${files.length} wird ausgelesen … (dauert ca. 10–30 Sekunden)`;
-            const dataUrl = await this.prepareImage(files[i], 1600, false, true);
-            rows.push(...await this.geminiExtract(dataUrl, (t) => { st.textContent = `Foto ${i + 1} von ${files.length}: ${t}`; }));
+            const status = (t) => { st.textContent = `Foto ${i + 1} von ${files.length}: ${t}`; };
+            try {
+              rows.push(...await this.geminiExtract(await this.prepareImage(files[i], 1600, false, true), status));
+            } catch (e) {
+              if (!e.busy) throw e;
+              status('⏳ Zweiter Versuch mit verkleinertem Foto …');
+              rows.push(...await this.geminiExtract(await this.prepareImage(files[i], 1100, false, true), status, true));
+            }
           }
         } catch (e) {
           console.error(e);
@@ -3434,7 +3444,7 @@ const DEFAULT_UNITS_MORE3 = [
         });
         const busy = (st) => [500, 502, 503, 504].includes(st);
         const models = [s.aiModel || 'gemini-flash-latest'];
-        let listed = false, lastStatus = 0;
+        let listed = false, lastStatus = 0, lastMsg = '';
         // Google ist zeitweise überlastet (503): pro Modell 2 Versuche, danach bis zu 2 andere Modelle
         for (let mi = 0; mi < models.length && mi < 3; mi++) {
           const model = models[mi];
@@ -3449,14 +3459,17 @@ const DEFAULT_UNITS_MORE3 = [
               return parts.filter(p => p.text && !p.thought).map(p => p.text).join('');
             }
             lastStatus = res.status;
+            let msg = '';
+            try { msg = ((await res.clone().json()).error || {}).message || ''; } catch (_) {}
+            if (msg) lastMsg = msg;
+            const gc = body.generationConfig || {};
+            if (res.status === 400 && gc.thinkingConfig && /think/i.test(msg)) { delete gc.thinkingConfig; attempt--; continue; }
             if (busy(res.status) && attempt === 0) {
               onStatus('⏳ Google ist gerade ausgelastet – neuer Versuch in ein paar Sekunden …');
               await sleep(4000);
               continue;
             }
             if (busy(res.status) || res.status === 404) break;   // → nächstes Modell
-            let msg = '';
-            try { msg = ((await res.json()).error || {}).message || ''; } catch (_) {}
             if (res.status === 400 && /api key|API_KEY/i.test(msg)) throw this.aiError('Der KI-Schlüssel ist ungültig. Bitte in den Einstellungen prüfen.');
             if (res.status === 403) throw this.aiError('Der KI-Schlüssel hat keinen Zugriff. Bitte in den Einstellungen einen neuen Schlüssel eintragen.');
             if (res.status === 429) throw this.aiError('Tageslimit oder zu viele Anfragen hintereinander. Bitte in ein paar Minuten (oder morgen) nochmal versuchen.');
@@ -3469,7 +3482,9 @@ const DEFAULT_UNITS_MORE3 = [
           if (mi + 1 < Math.min(models.length, 3)) onStatus('⏳ Versuche ein anderes KI-Modell …');
         }
         if (lastStatus === 404) throw this.aiError('Es wurde kein passendes KI-Modell gefunden. Bitte den Schlüssel in den Einstellungen neu testen.');
-        throw this.aiError('Google ist gerade überlastet (Fehler 503). Das liegt nicht an der App – bitte in ein paar Minuten nochmal versuchen.');
+        const err = this.aiError(`Google hat die Anfrage abgelehnt (Fehler ${lastStatus}${lastMsg ? `: „${lastMsg.slice(0, 160)}“` : ''}). Tipp: „📋 Anweisung für Gemini-App kopieren“ verwenden oder später nochmal versuchen.`);
+        err.busy = true;
+        throw err;
       },
 
       /** verfügbare Flash-Modelle, beste zuerst: stabile Flash → Flash-Lite → Vorschau-Versionen */
@@ -3488,7 +3503,7 @@ const DEFAULT_UNITS_MORE3 = [
 
       async findGeminiModel() { return (await this.listGeminiModels())[0] || null; },
 
-      async geminiExtract(dataUrl, onStatus) {
+      async geminiExtract(dataUrl, onStatus, simple = false) {
         const fill = this.state.settings.aiFill;
         const prompt = [
           'You extract English-German vocabulary from a photo of a page from an Austrian lower-secondary English textbook or workbook (e.g. MORE!).',
@@ -3505,8 +3520,9 @@ const DEFAULT_UNITS_MORE3 = [
           '- Ignore headings, page numbers, unit numbers, section numbers in circles, instructions, footers and handwriting.',
           '- Never add entries that are not on the page.'
         ].join('\n');
+        const fullPrompt = simple ? prompt + '\nAnswer ONLY with a JSON array of objects with the keys en, de, ex, deFromPage, exFromPage.' : prompt;
         const body = {
-          contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: 'image/jpeg', data: dataUrl.split(',')[1] } }] }],
+          contents: [{ role: 'user', parts: [{ text: fullPrompt }, { inline_data: { mime_type: 'image/jpeg', data: dataUrl.split(',')[1] } }] }],
           generationConfig: {
             temperature: 0.1,
             responseMimeType: 'application/json',
@@ -3520,6 +3536,11 @@ const DEFAULT_UNITS_MORE3 = [
             }
           }
         };
+        if (simple) {
+          // zweiter Weg: ohne festes Antwortschema und mit wenig „Nachdenkzeit“ → schneller, seltener Zeitüberschreitung
+          delete body.generationConfig.responseSchema;
+          body.generationConfig.thinkingConfig = { thinkingLevel: 'low' };
+        }
         const text = await this.geminiCall(body, onStatus);
         let arr;
         try { arr = JSON.parse(text.replace(/```(?:json)?/gi, '').trim()); }
@@ -3531,7 +3552,81 @@ const DEFAULT_UNITS_MORE3 = [
         });
       },
 
+      /* ---------- Gemini-App (ohne Schlüssel) ---------- */
+      geminiAppPrompt() {
+        return [
+          'Lies alle Vokabeln von dieser Schulbuchseite aus.',
+          'Antworte NUR mit Zeilen im Format: Englisch ; Deutsch ; englischer Beispielsatz',
+          '- Pro Vokabel genau eine Zeile. Keine Überschriften, keine Nummern, keine Aufzählungszeichen, keine Tabelle, kein Kommentar.',
+          '- Englisch und Deutsch genau so übernehmen, wie sie auf der Seite stehen (z. B. „to give“).',
+          '- Steht kein Deutsch auf der Seite: ins österreichische Deutsch übersetzen (Nomen mit Artikel, z. B. „der Radiergummi“).',
+          '- Steht kein Beispielsatz auf der Seite: einen kurzen, einfachen englischen Satz für 10- bis 12-Jährige schreiben.',
+          '- Bei Zahlen wie „7 seven“ nur das Wort verwenden („seven“).',
+          '- Abschnittsnummern, Seitenzahlen und Anweisungen weglassen.'
+        ].join('\n');
+      },
+
+      async copyGeminiPrompt() {
+        const text = this.geminiAppPrompt();
+        let ok = false;
+        try { await navigator.clipboard.writeText(text); ok = true; } catch (_) {}
+        this.modal({
+          title: '🤖 Mit der Gemini-App auslesen',
+          html: `<ol class="steps">
+              <li>${ok ? '✅ Die Anweisung ist <b>kopiert</b>.' : 'Die Anweisung unten markieren und kopieren.'}</li>
+              <li><b>Gemini-App</b> öffnen → <b>＋</b> → Foto der Vokabelseite aufnehmen oder auswählen.</li>
+              <li>Ins Eingabefeld tippen → <b>Einsetzen</b> → senden.</li>
+              <li>Unter der Antwort auf <b>Kopieren</b> tippen.</li>
+              <li>Zurück im Vokabeltrainer: ins graue Textfeld tippen → <b>Einsetzen</b> → <b>„Text erkennen &amp; prüfen“</b>.</li>
+            </ol>
+            <textarea readonly style="margin-top:10px;min-height:150px;font-size:13px">${esc(text)}</textarea>`,
+          buttons: [{ label: 'Verstanden', kind: 'primary', value: 'ok' }]
+        });
+      },
+
       /* ---------- KI-Einstellungen ---------- */
+      async aiDiagnose() {
+        const s = this.state.settings;
+        if (!s.aiKey) { this.toast('Bitte zuerst einen Schlüssel speichern.', 'error'); return; }
+        const lines = [];
+        const show = (final) => {
+          const el = $('aiState');
+          el.innerHTML = lines.map(l => `<div>${l}</div>`).join('') + (final ? '' : '<div>⏳ …</div>');
+        };
+        const raw = async (model, body) => {
+          const t0 = Date.now();
+          try {
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': s.aiKey }, body: JSON.stringify(body)
+            });
+            let msg = '';
+            try { const j = await res.json(); msg = res.ok ? '' : ((j.error || {}).message || ''); } catch (_) {}
+            return { st: res.status, ok: res.ok, ms: Date.now() - t0, msg };
+          } catch (e) { return { st: 0, ok: false, ms: Date.now() - t0, msg: 'keine Verbindung' }; }
+        };
+        const fmt = (label, r) => `${r.ok ? '✅' : '❌'} ${esc(label)}: ${r.ok ? 'OK' : 'Fehler ' + r.st} (${(r.ms / 1000).toFixed(1)} s)${r.msg ? ` – <i>${esc(r.msg.slice(0, 180))}</i>` : ''}`;
+        lines.push(`🔑 Schlüssel …${esc(s.aiKey.slice(-4))} · Modell <b>${esc(s.aiModel)}</b>`); show();
+        const models = await this.listGeminiModels();
+        lines.push(models.length ? `✅ ${models.length} passende Modelle: ${esc(models.slice(0, 4).join(', '))}` : '❌ Modellliste nicht abrufbar'); show();
+        const r1 = await raw(s.aiModel, { contents: [{ role: 'user', parts: [{ text: 'Reply with OK.' }] }] });
+        lines.push(fmt('Text-Anfrage', r1)); show();
+        const c = document.createElement('canvas'); c.width = 600; c.height = 200;
+        const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 600, 200); ctx.fillStyle = '#000'; ctx.font = '40px sans-serif';
+        ctx.fillText('dog    der Hund', 30, 80); ctx.fillText('cat    die Katze', 30, 150);
+        const img = c.toDataURL('image/jpeg', 0.9).split(',')[1];
+        const r2 = await raw(s.aiModel, { contents: [{ role: 'user', parts: [{ text: 'Read the words in this image.' }, { inline_data: { mime_type: 'image/jpeg', data: img } }] }] });
+        lines.push(fmt('Bild-Anfrage', r2)); show();
+        const other = models.find(m => m !== s.aiModel);
+        if (!r2.ok && other) {
+          const r3 = await raw(other, { contents: [{ role: 'user', parts: [{ text: 'Read the words in this image.' }, { inline_data: { mime_type: 'image/jpeg', data: img } }] }] });
+          lines.push(fmt(`Bild-Anfrage mit ${other}`, r3));
+          if (r3.ok) { s.aiModel = other; this.save(false); lines.push(`➡️ Modell auf <b>${esc(other)}</b> umgestellt.`); }
+        }
+        lines.push('<span class="tiny muted">Tipp: Einen Screenshot davon kannst du mir schicken.</span>');
+        show(true);
+      },
+
+      /* ---------- KI-Schlüssel ---------- */
       async saveAiKey() {
         const key = $('aiKeyInput').value.trim();
         if (!key) { this.toast('Bitte zuerst den Schlüssel einfügen.', 'error'); $('aiKeyInput').focus(); return; }
