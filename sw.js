@@ -1,6 +1,6 @@
 /* Service Worker: macht den Vokabeltrainer offline-fähig.
    Bei einer neuen Version einfach die Zahl in CACHE erhöhen. */
-const CACHE = 'vokabeltrainer-3.1';
+const CACHE = 'vokabeltrainer-3.2';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {

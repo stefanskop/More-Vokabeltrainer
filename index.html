@@ -238,6 +238,7 @@
     .review-table td { vertical-align: top; padding: 0 3px; }
     .review-table input { min-height: 42px; padding: 8px 10px; font-size: 15px; }
     .review-table tr.dup input { border-color: var(--amber); }
+    .review-table input.ai { border-style: dashed; border-color: var(--indigo); background: var(--indigo-soft); }
     .steps { margin: 6px 0 0; padding-left: 20px; }
     .steps li { margin: 4px 0; }
 
@@ -531,22 +532,21 @@
 
           <div class="card stack">
             <h3 class="bold">📷 Aus dem Buch übernehmen</h3>
+            <label class="btn indigo lg block" title="Ein oder mehrere Fotos von Vokabelseiten auslesen">
+              📷 Foto auslesen ✨
+              <input type="file" accept="image/*" multiple class="hidden" onchange="app.photoImport(event)" />
+            </label>
+            <p class="tiny muted">Funktioniert mit Vokabeltabellen (Englisch · Beispielsatz · Deutsch) und mit Bildseiten, auf denen nur englische Wörter stehen – die Übersetzung wird dann ergänzt. Mehrere Fotos auf einmal sind möglich. Danach kannst du alles in einer Tabelle prüfen.</p>
+            <div class="tiny muted" id="ocrStatus" style="font-weight:700;color:var(--indigo)"></div>
             <div class="banner info">
-              <div style="font-size:22px">✨</div>
+              <div style="font-size:20px">⌨️</div>
               <div class="grow">
-                <b>Am besten: iPad-Texterkennung (Live Text)</b>
-                Ins graue Feld unten tippen → nochmals tippen → <b style="display:inline">„Text scannen“</b> (Symbol mit Rahmen) wählen → Kamera auf die Vokabelliste halten → „Einsetzen“. Funktioniert offline.
+                <b>Oder abtippen bzw. ohne Internet scannen</b>
+                Ins Feld tippen → nochmals tippen → „Text scannen“ → „Einsetzen“. Fehlendes Deutsch wird aus vorhandenen Vokabeln vorgeschlagen.
               </div>
             </div>
-            <textarea id="bulkText" lang="en" placeholder="cliff ; die Klippe ; The cliffs are high.&#10;ancient – uralt&#10;tradition = die Tradition&#10;&#10;Hier hinein scannen oder einfügen …"></textarea>
-            <div class="row wrap">
-              <button class="btn indigo grow" onclick="app.parseBulk()">🔎 Erkennen &amp; prüfen</button>
-              <label class="btn" title="Foto aus der Mediathek auslesen (braucht Internet)">
-                🖼️ Foto auslesen
-                <input type="file" accept="image/*" class="hidden" onchange="app.photoImport(event)" />
-              </label>
-            </div>
-            <div class="tiny muted" id="ocrStatus"></div>
+            <textarea id="bulkText" lang="en" placeholder="cliff ; die Klippe ; The cliffs are high.&#10;ancient – uralt&#10;tradition = die Tradition&#10;&#10;Hier hinein tippen, scannen oder einfügen …"></textarea>
+            <button class="btn grow" onclick="app.parseBulk()">🔎 Text erkennen &amp; prüfen</button>
             <p class="tiny muted">Erkannt werden Zeilen wie <code>Englisch ; Deutsch ; Beispiel</code>, aber auch Trennungen mit Tab, „–“, „=“ oder Lautschrift dazwischen. Vor dem Speichern kannst du alles kontrollieren.</p>
           </div>
         </div>
@@ -561,7 +561,7 @@
                 <button class="btn sm" onclick="app.reviewSwapAll()">⇄ EN/DE tauschen</button>
               </div>
             </div>
-            <p class="tiny muted">Gelb markiert = gibt es in dieser Unit schon (wird übersprungen). Leere Zeilen werden ignoriert.</p>
+            <p class="tiny muted"><span style="color:var(--amber);font-weight:800">Gelb</span> = gibt es in dieser Unit schon (wird übersprungen). <span style="color:var(--indigo);font-weight:800">Blau gestrichelt</span> = von der KI ergänzt oder aus vorhandenen Vokabeln vorgeschlagen – bitte kurz prüfen. Zeilen ohne Deutsch werden nicht gespeichert.</p>
             <div style="overflow-x:auto"><table class="review-table" id="reviewTable"></table></div>
             <label class="check"><input type="checkbox" id="replaceUnit" /> Bestehende Vokabeln dieser Unit vorher ersetzen 🔒</label>
             <div class="row">
@@ -637,6 +637,20 @@
           <button data-theme="dark" onclick="app.setSetting('theme','dark')">🌙 Dunkel</button>
         </div>
         <label class="check"><input type="checkbox" id="typoChk" onchange="app.setSetting('forgiveTypos', this.checked)" /> Beim Schreiben einen kleinen Tippfehler als richtig werten</label>
+      </div>
+
+      <div class="card stack" id="aiCard">
+        <h2 class="bold" style="font-size:20px">✨ KI-Bilderkennung für Vokabelseiten</h2>
+        <p class="small muted">Liest Fotos von Vokabelseiten zuverlässig aus – auch Tabellen mit Beispielsätzen – und übersetzt Seiten, auf denen nur englische Wörter stehen. Braucht Internet und einen kostenlosen Schlüssel von Google (Gemini). Einmalig von einem Erwachsenen einzurichten.</p>
+        <div id="aiState" class="small"></div>
+        <input type="password" id="aiKeyInput" placeholder="Schlüssel einfügen (beginnt meist mit „AIza…“)" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+        <div class="row wrap">
+          <button class="btn primary" onclick="app.saveAiKey()">Speichern &amp; testen</button>
+          <button class="btn sm ghost" onclick="app.showAiHelp()">❓ Wie bekomme ich einen Schlüssel?</button>
+          <button class="btn sm ghost hidden" id="aiRemoveBtn" onclick="app.removeAiKey()">Schlüssel entfernen</button>
+        </div>
+        <label class="check"><input type="checkbox" id="aiFillChk" onchange="app.setSetting('aiFill', this.checked)" /> Fehlende Übersetzungen und Beispielsätze von der KI ergänzen lassen</label>
+        <p class="tiny muted">Datenschutz: Gesendet wird nur das Foto der Buchseite – keine Namen, keine Lernstände. Im kostenlosen Tarif darf Google die Fotos zur Verbesserung seiner Dienste nutzen, daher nur Buchseiten fotografieren. Der Schlüssel bleibt auf diesem Gerät und kommt nicht ins Backup.</p>
       </div>
 
       <div class="card stack">
@@ -1931,7 +1945,7 @@ const DEFAULT_UNITS_MORE3 = [
        Alle Daten bleiben lokal (localStorage). Keine externen Dienste,
        außer der optionalen Foto-Texterkennung (Tesseract, nur bei Bedarf).
        ===================================================================== */
-    const APP_VERSION = '3.1';
+    const APP_VERSION = '3.2';
     const STORAGE_KEY = 'vokabeltrainer_v3';
     const LEGACY_KEYS = ['more4_vokabeltrainer_v2', 'more4_vokabeltrainer_v1'];
     const BOX_DAYS = [0, 1, 3, 7, 14, 30];   // Lernkartei: Fach -> Tage bis zur nächsten Wiederholung
@@ -1998,7 +2012,8 @@ const DEFAULT_UNITS_MORE3 = [
       return {
         theme: 'auto', accent: 'en-GB', speechRate: 0.8, autoSpeak: false, voiceURI: '',
         forgiveTypos: true, pinHash: '', lastBackupAt: null, changesSinceBackup: 0,
-        backupSnoozeUntil: null, installTipDismissed: false, welcomeDismissed: false
+        backupSnoozeUntil: null, installTipDismissed: false, welcomeDismissed: false,
+        aiKey: '', aiModel: 'gemini-flash-latest', aiFill: true
       };
     }
 
@@ -3218,11 +3233,33 @@ const DEFAULT_UNITS_MORE3 = [
         if (!text.trim()) { this.toast('Das Textfeld ist noch leer.', 'error'); $('bulkText').focus(); return; }
         if (!this.currentUnit()) { this.toast('Bitte zuerst eine Unit anlegen.', 'error'); return; }
         const r = this.parseVocabText(text);
+        const sug = this.suggestGerman(r.rows);
         this.review = r;
+        if (sug) setTimeout(() => this.toast(`${sug}× Deutsch aus vorhandenen Vokabeln vorgeschlagen (blau markiert).`, 'info'), 400);
         this.renderReview();
         $('reviewCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
         const incomplete = r.rows.filter(x => !x.de).length;
         if (incomplete && incomplete === r.rows.length && r.rows.length >= 2) this.toast('Englisch und Deutsch stehen in getrennten Zeilen? Probiere „Spalten zusammenführen“ oder „Abwechselnde Zeilen“.', 'info', null, 7000);
+      },
+
+      /** fehlendes Deutsch aus allen vorhandenen Vokabeln vorschlagen (offline) */
+      suggestGerman(rows) {
+        if (!this._dict) {
+          this._dict = new Map();
+          Object.values(this.state.books).forEach(units => units.forEach(u => u.words.forEach(w => {
+            const k = this.normAnswer(w.en);
+            if (k && !this._dict.has(k)) this._dict.set(k, w.de);
+          })));
+          setTimeout(() => { this._dict = null; }, 60000);
+        }
+        let n = 0;
+        rows.forEach(r => {
+          if (r.en && !r.de.trim()) {
+            const d = this._dict.get(this.normAnswer(r.en));
+            if (d) { r.de = d; r.deSug = true; n++; }
+          }
+        });
+        return n;
       },
 
       reviewPairMode(mode) {
@@ -3234,6 +3271,7 @@ const DEFAULT_UNITS_MORE3 = [
         } else {
           for (let i = 0; i < lines.length; i += 2) rows.push({ en: lines[i] || '', de: lines[i + 1] || '', ex: '' });
         }
+        this.suggestGerman(rows);
         this.review.rows = rows;
         this.renderReview();
       },
@@ -3255,13 +3293,20 @@ const DEFAULT_UNITS_MORE3 = [
         tbl.innerHTML = '<tr class="tiny muted"><td>Englisch</td><td>Deutsch</td><td>Beispiel (optional)</td><td></td></tr>';
         this.review.rows.forEach((r, i) => {
           const tr = document.createElement('tr');
+          const deCls = r.deAI || r.deSug ? 'ai' : '', exCls = r.exAI ? 'ai' : '';
+          const deTip = r.deSug ? 'Vorschlag aus vorhandenen Vokabeln' : r.deAI ? 'Von der KI übersetzt – bitte prüfen' : '';
           tr.innerHTML = `<td style="min-width:150px"><input type="text" lang="en" data-k="en" value="${esc(r.en)}" /></td>
-            <td style="min-width:150px"><input type="text" lang="de" data-k="de" value="${esc(r.de)}" /></td>
-            <td style="min-width:150px"><input type="text" lang="en" data-k="ex" value="${esc(r.ex)}" /></td>
+            <td style="min-width:150px"><input type="text" lang="de" data-k="de" class="${deCls}" title="${deTip}" value="${esc(r.de)}" /></td>
+            <td style="min-width:150px"><input type="text" lang="en" data-k="ex" class="${exCls}" title="${exCls ? 'Von der KI ergänzt – bitte prüfen' : ''}" value="${esc(r.ex)}" /></td>
             <td style="white-space:nowrap"><button class="icon-btn" data-a="swap" title="EN/DE tauschen">⇄</button><button class="icon-btn" data-a="del" title="Zeile entfernen">✕</button></td>`;
           const upd = () => tr.classList.toggle('dup', !!u && this.isDuplicate(u, tr.querySelector('[data-k=en]').value, tr.querySelector('[data-k=de]').value));
-          tr.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => { this.review.rows[i][inp.dataset.k] = inp.value; upd(); this.updateReviewCount(); }));
-          tr.querySelector('[data-a=swap]').onclick = () => { this.syncReviewFromTable(); const x = this.review.rows[i]; [x.en, x.de] = [x.de, x.en]; this.renderReview(); };
+          tr.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => {
+            const row = this.review.rows[i];
+            row[inp.dataset.k] = inp.value;
+            if (inp.classList.contains('ai')) { inp.classList.remove('ai'); if (inp.dataset.k === 'de') { row.deAI = row.deSug = false; } else row.exAI = false; }
+            upd(); this.updateReviewCount();
+          }));
+          tr.querySelector('[data-a=swap]').onclick = () => { this.syncReviewFromTable(); const x = this.review.rows[i]; [x.en, x.de] = [x.de, x.en]; x.deAI = x.deSug = false; this.renderReview(); };
           tr.querySelector('[data-a=del]').onclick = () => { this.syncReviewFromTable(); this.review.rows.splice(i, 1); this.renderReview(); };
           upd();
           tbl.appendChild(tr);
@@ -3276,7 +3321,7 @@ const DEFAULT_UNITS_MORE3 = [
 
       syncReviewFromTable() {
         const trs = [...$('reviewTable').querySelectorAll('tr')].filter(tr => tr.querySelector('[data-k=en]'));
-        this.review.rows = trs.map(tr => ({ en: tr.querySelector('[data-k=en]').value, de: tr.querySelector('[data-k=de]').value, ex: tr.querySelector('[data-k=ex]').value }));
+        this.review.rows = trs.map((tr, i) => ({ ...(this.review.rows[i] || {}), en: tr.querySelector('[data-k=en]').value, de: tr.querySelector('[data-k=de]').value, ex: tr.querySelector('[data-k=ex]').value }));
       },
 
       updateReviewCount() {
@@ -3330,9 +3375,182 @@ const DEFAULT_UNITS_MORE3 = [
       },
 
       async photoImport(ev) {
-        const file = ev.target.files && ev.target.files[0];
+        const files = [...(ev.target.files || [])];
         ev.target.value = '';
-        if (!file) return;
+        if (!files.length) return;
+        if (!this.currentUnit()) { this.toast('Bitte zuerst eine Unit anlegen.', 'error'); return; }
+        if (this.state.settings.aiKey) return this.aiImport(files);
+        const res = await this.modal({
+          title: '📷 Foto auslesen',
+          html: `<p>Für ein sauberes Auslesen von Vokabelseiten (Tabellen mit Beispielsätzen oder Bildseiten nur mit englischen Wörtern) braucht die App die <b>KI-Bilderkennung</b>. Sie ist kostenlos, muss aber einmal von einem Erwachsenen in den Einstellungen eingerichtet werden (ca. 3 Minuten).</p>
+            <p style="margin-top:10px" class="small muted">Ohne KI geht es so: Ins Textfeld tippen → „Text scannen“. Oder die einfache Erkennung verwenden – die bringt bei Tabellen aber oft die Spalten durcheinander.</p>`,
+          buttons: [{ label: 'Abbrechen', value: null }, { label: 'Einfache Erkennung', value: 'simple' }, { label: '✨ KI einrichten', kind: 'primary', value: 'setup' }]
+        });
+        if (!res || !res.value) return;
+        if (res.value === 'setup') { this.go('settings'); setTimeout(() => $('aiCard').scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); return; }
+        this.tesseractImport(files[0]);
+      },
+
+      async aiImport(files) {
+        if (this._aiBusy) return;
+        this._aiBusy = true;
+        const st = $('ocrStatus');
+        const rows = [];
+        try {
+          for (let i = 0; i < files.length; i++) {
+            st.textContent = `✨ Foto ${i + 1} von ${files.length} wird ausgelesen … (dauert ca. 10–30 Sekunden)`;
+            const dataUrl = await this.prepareImage(files[i], 1800, false, true);
+            rows.push(...await this.geminiExtract(dataUrl));
+          }
+        } catch (e) {
+          console.error(e);
+          this.toast(e.userMessage || 'Das Auslesen hat nicht geklappt. Bitte Internetverbindung prüfen und nochmal versuchen.', 'error', null, 8000);
+        } finally {
+          st.textContent = '';
+          this._aiBusy = false;
+        }
+        const seen = new Set();
+        const uniq = rows.filter(r => { const k = this.normAnswer(r.en) + '|' + this.normAnswer(r.de); if (seen.has(k)) return false; seen.add(k); return true; });
+        if (!uniq.length) { if (rows.length === 0 && !st.textContent) this.toast('Auf dem Foto wurden keine Vokabeln gefunden.', 'error'); return; }
+        this.suggestGerman(uniq);
+        this.review = { rows: uniq, rawLines: uniq.map(r => r.en) };
+        this.renderReview();
+        $('reviewCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const gen = uniq.filter(r => r.deAI || r.exAI).length;
+        this.toast(`${uniq.length} Vokabeln erkannt${gen ? ` – ${gen} davon von der KI ergänzt (blau markiert)` : ''}. Bitte kurz prüfen und speichern.`, 'success', null, 6000);
+      },
+
+      aiError(msg) { const e = new Error(msg); e.userMessage = msg; return e; },
+
+      async geminiCall(body) {
+        const s = this.state.settings;
+        const send = (model) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': s.aiKey },
+          body: JSON.stringify(body)
+        });
+        let res;
+        try { res = await send(s.aiModel || 'gemini-flash-latest'); }
+        catch (e) { throw this.aiError('Keine Internetverbindung. Die KI-Bilderkennung braucht Internet – offline bitte „Text scannen“ verwenden.'); }
+        if (res.status === 404) {
+          // Modellname veraltet → automatisch ein aktuelles Flash-Modell suchen
+          const m = await this.findGeminiModel();
+          if (m) { s.aiModel = m; this.save(false); res = await send(m); }
+        }
+        if (!res.ok) {
+          let msg = '';
+          try { msg = ((await res.json()).error || {}).message || ''; } catch (_) {}
+          if (res.status === 400 && /api key|API_KEY/i.test(msg)) throw this.aiError('Der KI-Schlüssel ist ungültig. Bitte in den Einstellungen prüfen.');
+          if (res.status === 403) throw this.aiError('Der KI-Schlüssel hat keinen Zugriff. Bitte in den Einstellungen einen neuen Schlüssel eintragen.');
+          if (res.status === 429) throw this.aiError('Zu viele Anfragen oder Tageslimit erreicht. Bitte in einer Minute (oder morgen) nochmal versuchen.');
+          throw this.aiError(`Die KI hat einen Fehler gemeldet (${res.status}). ${msg}`.trim());
+        }
+        const data = await res.json();
+        const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
+        return parts.filter(p => p.text && !p.thought).map(p => p.text).join('');
+      },
+
+      async findGeminiModel() {
+        try {
+          const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': this.state.settings.aiKey } });
+          if (!res.ok) return null;
+          const list = ((await res.json()).models || []).filter(m => (m.supportedGenerationMethods || []).includes('generateContent') && /flash/i.test(m.name));
+          const ver = (n) => (n.match(/(\d+(?:\.\d+)?)/) || [0, 0])[1] * 1;
+          const pick = (arr) => arr.sort((a, b) => ver(b.name) - ver(a.name))[0];
+          const stable = list.filter(m => !/(lite|image|tts|live|audio|embed|preview|exp|thinking|transcribe)/i.test(m.name));
+          const m = pick(stable) || pick(list.filter(m => !/(image|tts|live|audio|embed|transcribe)/i.test(m.name)));
+          return m ? m.name.replace(/^models\//, '') : null;
+        } catch (_) { return null; }
+      },
+
+      async geminiExtract(dataUrl) {
+        const fill = this.state.settings.aiFill;
+        const prompt = [
+          'You extract English-German vocabulary from a photo of a page from an Austrian lower-secondary English textbook or workbook (e.g. MORE!).',
+          'The page can be: (a) a table with the columns English word/phrase | English example sentence | German translation, sometimes with small section numbers in circles; (b) a picture page or word file with English labels only (numbers, colours, objects in a picture); (c) any other vocabulary list.',
+          'Rules:',
+          '- Return one item per vocabulary entry, in reading order (top to bottom; in multi-column layouts finish the left column first).',
+          '- en: the English word or phrase exactly as printed (keep "to" before verbs and additions like "(= I\'m)"). For numbers printed with digits like "7 seven" use only the word, e.g. "seven".',
+          '- de: the German translation exactly as printed on the page, then deFromPage=true.' + (fill
+            ? ' If the page has no German for this entry, translate it into German as used in Austria (nouns with article, e.g. "der Radiergummi", "das Heft", "die Füllfeder") and set deFromPage=false.'
+            : ' If the page has no German for this entry, use an empty string and deFromPage=false.'),
+          '- ex: the English example sentence printed in the same row, then exFromPage=true.' + (fill
+            ? ' If no example sentence is printed for the entry, write one short, simple English example sentence for 10- to 12-year-olds (CEFR A1) and set exFromPage=false.'
+            : ' If none is printed, use an empty string and exFromPage=false.'),
+          '- Ignore headings, page numbers, unit numbers, section numbers in circles, instructions, footers and handwriting.',
+          '- Never add entries that are not on the page.'
+        ].join('\n');
+        const body = {
+          contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: 'image/jpeg', data: dataUrl.split(',')[1] } }] }],
+          generationConfig: {
+            temperature: 0.1,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: { en: { type: 'STRING' }, de: { type: 'STRING' }, ex: { type: 'STRING' }, deFromPage: { type: 'BOOLEAN' }, exFromPage: { type: 'BOOLEAN' } },
+                required: ['en', 'de', 'ex', 'deFromPage', 'exFromPage']
+              }
+            }
+          }
+        };
+        const text = await this.geminiCall(body);
+        let arr;
+        try { arr = JSON.parse(text.replace(/```(?:json)?/gi, '').trim()); }
+        catch (e) { throw this.aiError('Die Antwort der KI war unvollständig. Bitte nochmal versuchen.'); }
+        if (!Array.isArray(arr)) arr = arr.items || arr.vocabulary || [];
+        return arr.filter(x => x && x.en && String(x.en).trim()).map(x => {
+          const de = String(x.de || '').trim(), ex = String(x.ex || '').trim();
+          return { en: String(x.en).trim(), de, ex, deAI: !!de && x.deFromPage === false, exAI: !!ex && x.exFromPage === false };
+        });
+      },
+
+      /* ---------- KI-Einstellungen ---------- */
+      async saveAiKey() {
+        const key = $('aiKeyInput').value.trim();
+        if (!key) { this.toast('Bitte zuerst den Schlüssel einfügen.', 'error'); $('aiKeyInput').focus(); return; }
+        if (!(await this.requirePin())) return;
+        const s = this.state.settings;
+        const old = s.aiKey;
+        s.aiKey = key;
+        $('aiState').textContent = '⏳ Verbindung wird getestet …';
+        try {
+          await this.geminiCall({ contents: [{ role: 'user', parts: [{ text: 'Reply with the single word OK.' }] }], generationConfig: { temperature: 0 } });
+          this.save(false);
+          $('aiKeyInput').value = '';
+          this.toast('✨ KI-Bilderkennung ist eingerichtet!');
+        } catch (e) {
+          s.aiKey = old;
+          this.toast(e.userMessage || 'Test fehlgeschlagen.', 'error', null, 7000);
+        }
+        this.renderSettings();
+      },
+
+      async removeAiKey() {
+        if (!this.state.settings.aiKey) return;
+        if (!(await this.requirePin())) return;
+        this.state.settings.aiKey = '';
+        this.save(false);
+        this.renderSettings();
+        this.toast('Schlüssel entfernt.');
+      },
+
+      showAiHelp() {
+        this.modal({
+          title: '✨ Kostenlosen KI-Schlüssel holen',
+          html: `<ol class="steps">
+              <li>Am Computer oder iPad <b>aistudio.google.com</b> öffnen und mit einem Google-Konto anmelden (Erwachsenen-Konto).</li>
+              <li>Den Bereich <b>„Get API key“</b> bzw. <b>„API Keys“</b> öffnen → <b>„Create API key“</b>. Falls gefragt, ein Projekt anlegen lassen.</li>
+              <li>Den Schlüssel kopieren, hier in das Feld einfügen und <b>„Speichern &amp; testen“</b> antippen.</li>
+            </ol>
+            <p class="small" style="margin-top:12px">Der kostenlose Tarif reicht für einige Dutzend Fotos pro Tag. Keine Kreditkarte hinterlegen – dann können auch keine Kosten entstehen.</p>
+            <p class="small muted" style="margin-top:8px">Hinweis: Im kostenlosen Tarif darf Google die gesendeten Fotos zur Verbesserung seiner Dienste verwenden. Fotografiert daher nur Buchseiten, keine Personen oder Namen.</p>`,
+          buttons: [{ label: 'Verstanden', kind: 'primary', value: 'ok' }]
+        });
+      },
+
+      async tesseractImport(file) {
         const st = $('ocrStatus');
         st.textContent = '⏳ Texterkennung wird geladen …';
         try {
@@ -3350,12 +3568,12 @@ const DEFAULT_UNITS_MORE3 = [
         } catch (e) {
           st.textContent = '';
           this.toast(e.message === 'offline'
-            ? 'Foto-Erkennung braucht Internet. Tipp: „Text scannen“ im Textfeld funktioniert offline und meist besser.'
-            : 'Im Foto wurde kein Text erkannt. Bitte gerade und scharf fotografieren – oder „Text scannen“ verwenden.', 'error', null, 7000);
+            ? 'Die einfache Foto-Erkennung braucht Internet. Tipp: „Text scannen“ im Textfeld funktioniert offline.'
+            : 'Im Foto wurde kein Text erkannt. Bitte gerade und scharf fotografieren.', 'error', null, 7000);
         }
       },
 
-      prepareImage(file, maxDim = 2000) {
+      prepareImage(file, maxDim = 2000, enhance = true, asDataUrl = false) {
         return new Promise((resolve, reject) => {
           const url = URL.createObjectURL(file);
           const img = new Image();
@@ -3366,11 +3584,11 @@ const DEFAULT_UNITS_MORE3 = [
             const c = document.createElement('canvas');
             c.width = w; c.height = h;
             const ctx = c.getContext('2d');
-            ctx.filter = 'grayscale(1) contrast(1.4)';
+            if (enhance) ctx.filter = 'grayscale(1) contrast(1.4)';
             ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
             ctx.drawImage(img, 0, 0, w, h);
             URL.revokeObjectURL(url);
-            resolve(c);
+            resolve(asDataUrl ? c.toDataURL('image/jpeg', 0.85) : c);
           };
           img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Bild')); };
           img.src = url;
@@ -3425,6 +3643,11 @@ const DEFAULT_UNITS_MORE3 = [
         document.querySelectorAll('#rateSeg button').forEach(b => b.classList.toggle('active', Number(b.dataset.rate) === nearest));
         document.querySelectorAll('#themeSeg button').forEach(b => b.classList.toggle('active', b.dataset.theme === s.theme));
         $('autoSpeakChk').checked = !!s.autoSpeak;
+        $('aiFillChk').checked = !!s.aiFill;
+        $('aiState').innerHTML = s.aiKey
+          ? `✅ <b>Eingerichtet</b> (Schlüssel …${esc(s.aiKey.slice(-4))} · Modell ${esc(s.aiModel)})`
+          : '– Noch kein Schlüssel hinterlegt.';
+        $('aiRemoveBtn').classList.toggle('hidden', !s.aiKey);
         $('typoChk').checked = !!s.forgiveTypos;
         this.renderVoiceSelect();
 
@@ -3447,7 +3670,7 @@ const DEFAULT_UNITS_MORE3 = [
       },
 
       async exportBackup() {
-        const data = { app: 'vokabeltrainer', exportedAt: new Date().toISOString(), ...this.state };
+        const data = { app: 'vokabeltrainer', exportedAt: new Date().toISOString(), ...this.state, settings: { ...this.state.settings, aiKey: '' } };
         const json = JSON.stringify(data);
         const name = `vokabeltrainer_backup_${today()}.json`;
         const markDone = () => {
@@ -3501,9 +3724,10 @@ const DEFAULT_UNITS_MORE3 = [
           if (!choice) return;
           if (choice === 'replace') {
             if (!empty && !(await this.requirePin())) return;
-            const keepPin = this.state.settings.pinHash;
+            const keepPin = this.state.settings.pinHash, keepKey = this.state.settings.aiKey, keepModel = this.state.settings.aiModel;
             this.state = incoming;
             if (!this.state.settings.pinHash && keepPin) this.state.settings.pinHash = keepPin;
+            if (keepKey) { this.state.settings.aiKey = keepKey; this.state.settings.aiModel = keepModel; }
           } else {
             this.mergeState(incoming);
           }
