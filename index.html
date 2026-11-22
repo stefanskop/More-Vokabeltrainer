@@ -633,6 +633,11 @@
           </div>
         </div>
         <label class="check"><input type="checkbox" id="autoSpeakChk" onchange="app.setSetting('autoSpeak', this.checked)" /> Englische Wörter automatisch vorlesen</label>
+        <div class="row wrap" style="padding-top:8px;border-top:1px solid var(--border)">
+          <button class="btn sm" onclick="app.speechDiagnose()">🩺 Sprachausgabe prüfen</button>
+          <span class="tiny muted">Spielt zwei kurze Testsätze ab und zeigt, was das iPad meldet.</span>
+        </div>
+        <div id="speechDiag" class="small stack" style="--g:4px"></div>
       </div>
 
       <div class="card stack">
@@ -1952,7 +1957,7 @@ const DEFAULT_UNITS_MORE3 = [
        Alle Daten bleiben lokal (localStorage). Keine externen Dienste,
        außer der optionalen Foto-Texterkennung (Tesseract, nur bei Bedarf).
        ===================================================================== */
-    const APP_VERSION = '3.5';
+    const APP_VERSION = '3.6';
     const STORAGE_KEY = 'vokabeltrainer_v3';
     const LEGACY_KEYS = ['more4_vokabeltrainer_v2', 'more4_vokabeltrainer_v1'];
     const BOX_DAYS = [0, 1, 3, 7, 14, 30];   // Lernkartei: Fach -> Tage bis zur nächsten Wiederholung
@@ -2150,9 +2155,7 @@ const DEFAULT_UNITS_MORE3 = [
         this.loadVoices();
         this.bindKeys();
         this.requestPersistence();
-        const unlock = () => { this.unlockSpeech(); document.removeEventListener('touchend', unlock, true); document.removeEventListener('click', unlock, true); };
-        document.addEventListener('touchend', unlock, true);
-        document.addEventListener('click', unlock, true);
+
         $('versionInfo').textContent = `Vokabeltrainer ${APP_VERSION}`;
         if (window.matchMedia) {
           window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => this.applyTheme());
@@ -2612,7 +2615,7 @@ const DEFAULT_UNITS_MORE3 = [
         else if (p.mode === 'typing') this.renderTyping(card);
         else this.renderFlash(card);
 
-        if (this.state.settings.autoSpeak && s.dir === 'en-de') setTimeout(() => this.speakText(card.en), 250);
+        if (this.state.settings.autoSpeak && s.dir === 'en-de') this.speakText(card.en);   // sofort, solange der Fingertipp „gilt“
       },
 
       nextCard() {
@@ -2950,62 +2953,95 @@ const DEFAULT_UNITS_MORE3 = [
         this.speakText(what === 'both' && c.ex ? `${word}. ${c.ex}` : word, btn, true);
       },
 
-      /** iPad: Sprachausgabe muss einmal direkt durch einen Fingertipp „freigeschaltet“ werden */
-      unlockSpeech() {
-        if (this._speechUnlocked || !('speechSynthesis' in window)) return;
-        this._speechUnlocked = true;
-        try {
-          const u = new SpeechSynthesisUtterance(' ');
-          u.volume = 0;
-          speechSynthesis.speak(u);
-        } catch (_) {}
-      },
-
+      /**
+       * Sprachausgabe für iPad/Safari:
+       * - speak() immer SOFORT im Fingertipp aufrufen (iOS blockiert verzögerte Aufrufe)
+       * - automatische Stimmenwahl = Systemstimme der Sprache (keine Stimme erzwingen)
+       * - wenn nach 0,8 s nichts gestartet ist: einmal mit der anderen Stimmen-Variante nachversuchen
+       */
       speakText(text, btn = null, alreadyClean = false) {
         if (!('speechSynthesis' in window)) { this.toast('Sprachausgabe wird hier nicht unterstützt.', 'error'); return; }
         const t = alreadyClean ? text : this.cleanSpeech(text);
         if (!t) return;
-        this._speechUnlocked = true;
         const synth = window.speechSynthesis;
-        const busy = synth.speaking || synth.pending;
         document.querySelectorAll('.speaking').forEach(b => b.classList.remove('speaking'));
         clearTimeout(this._speakTimer);
-        clearTimeout(this._speakDelay);
+        clearTimeout(this._speakWatch);
+        if (synth.speaking || synth.pending) { try { synth.cancel(); } catch (_) {} }
 
-        const go = (useVoice) => {
+        const chosen = this.state.settings.voiceURI ? this.pickVoice() : null;
+        const go = (voice, isRetry) => {
           const u = new SpeechSynthesisUtterance(t);
-          u.lang = this.state.settings.accent;
+          u.lang = (voice && voice.lang) ? voice.lang.replace('_', '-') : this.state.settings.accent;
           u.rate = this.state.settings.speechRate || 0.8;
-          const v = useVoice ? this.pickVoice() : null;
-          if (v) u.voice = v;
-          this._utter = u;   // Referenz halten – sonst bricht iOS die Ausgabe manchmal ab
+          u.volume = 1;
+          if (voice) u.voice = voice;
+          this._utter = u;   // Referenz halten – sonst bricht iOS manchmal ab
+          let started = false;
           const done = () => { if (btn) btn.classList.remove('speaking'); clearTimeout(this._speakTimer); };
+          u.onstart = () => { started = true; };
           u.onend = done;
           u.onerror = (ev) => {
             done();
             const err = ev && ev.error;
-            // mit gewählter Stimme gescheitert → einmal mit Standardstimme versuchen
-            if (v && err !== 'interrupted' && err !== 'canceled') go(false);
+            if (!isRetry && err !== 'interrupted' && err !== 'canceled') go(voice ? null : this.pickVoice(), true);
           };
           if (btn) btn.classList.add('speaking');
-          this._speakTimer = setTimeout(done, 2000 + t.length * 150 / (u.rate || 1));
+          this._speakTimer = setTimeout(done, 2500 + t.length * 150 / (u.rate || 1));
           try { synth.resume(); } catch (_) {}
           synth.speak(u);
+          if (!isRetry) {
+            this._speakWatch = setTimeout(() => {
+              if (!started && this._utter === u && !synth.speaking) go(voice ? null : this.pickVoice(), true);
+            }, 800);
+          }
         };
-
-        if (busy) {
-          // laufende Ausgabe stoppen und kurz warten – sofortiges speak() nach cancel() verschluckt Safari
-          try { synth.cancel(); } catch (_) {}
-          this._speakDelay = setTimeout(() => go(true), 150);
-        } else {
-          go(true);   // direkt im Fingertipp aufrufen (wichtig für iPad)
-        }
+        go(chosen, false);
       },
 
       stopSpeech() {
-        clearTimeout(this._speakDelay);
+        clearTimeout(this._speakWatch);
         try { if ('speechSynthesis' in window && (speechSynthesis.speaking || speechSynthesis.pending)) speechSynthesis.cancel(); } catch (_) {}
         document.querySelectorAll('.speaking').forEach(b => b.classList.remove('speaking'));
+      },
+
+      /** Diagnose: zeigt, was das Gerät bei der Sprachausgabe meldet (muss per Fingertipp gestartet werden) */
+      speechDiagnose() {
+        const out = $('speechDiag');
+        const lines = [];
+        const show = () => { out.innerHTML = lines.map(l => `<div>${l}</div>`).join(''); };
+        if (!('speechSynthesis' in window)) { lines.push('❌ Dieses Gerät/dieser Browser bietet keine Sprachausgabe an.'); show(); return; }
+        const synth = window.speechSynthesis;
+        const all = synth.getVoices();
+        const en = all.filter(v => /^en[-_]/i.test(v.lang));
+        lines.push(`ℹ️ ${ENV.isStandalone ? 'Home-Bildschirm-App' : 'Browser-Tab'} · ${all.length} Stimmen gesamt, ${en.length} englische`);
+        if (en.length) lines.push(`ℹ️ z. B. ${esc(en.slice(0, 4).map(v => `${v.name} (${v.lang})`).join(', '))}`);
+        show();
+        try { if (synth.speaking || synth.pending) synth.cancel(); } catch (_) {}
+        const run = (label, voice, next) => {
+          const u = new SpeechSynthesisUtterance('Hello! One, two, three.');
+          u.lang = voice ? voice.lang.replace('_', '-') : this.state.settings.accent;
+          u.rate = 0.9; u.volume = 1;
+          if (voice) u.voice = voice;
+          this._utter = u;
+          let ev = [], finished = false;
+          const end = (txt) => {
+            if (finished) return; finished = true;
+            lines.push(`${txt.startsWith('✅') ? '' : ''}${txt} – ${esc(label)}`); show();
+            if (next) setTimeout(next, 400); else hint();
+          };
+          u.onstart = () => ev.push('start');
+          u.onend = () => end(ev.includes('start') ? '✅ gesprochen (Start + Ende gemeldet)' : '⚠️ Ende ohne Start gemeldet');
+          u.onerror = (e) => end(`❌ Fehler „${esc((e && e.error) || 'unbekannt')}“`);
+          synth.speak(u);
+          setTimeout(() => end(ev.includes('start') ? '⚠️ gestartet, aber kein Ende gemeldet' : '❌ keine Reaktion (nicht gestartet)'), 5000);
+        };
+        const hint = () => {
+          lines.push('<span class="tiny muted">Wenn „gesprochen“ steht, aber nichts zu hören war: Stummmodus (Glocke im Kontrollzentrum) ausschalten bzw. Bluetooth-Kopfhörer prüfen. Einen Screenshot davon kannst du mir schicken.</span>');
+          show();
+        };
+        const best = this.pickVoice();
+        run('Test 1: Systemstimme', null, best ? () => run(`Test 2: Stimme ${best.name}`, best, null) : null);
       },
 
       /* =====================================================================
@@ -3786,7 +3822,7 @@ const DEFAULT_UNITS_MORE3 = [
         const sel = $('voiceSelect');
         const acc = this.state.settings.accent;
         const list = [...this.voices].sort((a, b) => (b.lang.replace('_', '-') === acc) - (a.lang.replace('_', '-') === acc) || a.name.localeCompare(b.name));
-        sel.innerHTML = `<option value="">Automatisch (beste ${acc === 'en-GB' ? 'britische' : 'amerikanische'} Stimme)</option>` +
+        sel.innerHTML = `<option value="">Automatisch (${acc === 'en-GB' ? 'britische' : 'amerikanische'} Systemstimme)</option>` +
           list.map(v => `<option value="${esc(v.voiceURI)}">${esc(v.name)} (${esc(v.lang)})</option>`).join('');
         sel.value = this.state.settings.voiceURI || '';
         if (!this.voices.length) sel.innerHTML = '<option value="">Keine englische Stimme gefunden</option>';
