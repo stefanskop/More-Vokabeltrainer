@@ -1945,7 +1945,7 @@ const DEFAULT_UNITS_MORE3 = [
        Alle Daten bleiben lokal (localStorage). Keine externen Dienste,
        außer der optionalen Foto-Texterkennung (Tesseract, nur bei Bedarf).
        ===================================================================== */
-    const APP_VERSION = '3.2';
+    const APP_VERSION = '3.3';
     const STORAGE_KEY = 'vokabeltrainer_v3';
     const LEGACY_KEYS = ['more4_vokabeltrainer_v2', 'more4_vokabeltrainer_v1'];
     const BOX_DAYS = [0, 1, 3, 7, 14, 30];   // Lernkartei: Fach -> Tage bis zur nächsten Wiederholung
@@ -2418,7 +2418,7 @@ const DEFAULT_UNITS_MORE3 = [
           const b = document.createElement('button');
           b.className = 'chip' + (k === this.bookKey() ? ' active' : '');
           b.setAttribute('role', 'tab');
-          b.textContent = `${m.emoji || '📓'} ${m.label}${m.grade ? ` · ${m.grade}.` : ''}`;
+          b.textContent = `${m.emoji || '📓'} ${m.label}`;
           b.onclick = () => this.setBook(k);
           c.appendChild(b);
         });
@@ -3396,14 +3396,16 @@ const DEFAULT_UNITS_MORE3 = [
         this._aiBusy = true;
         const st = $('ocrStatus');
         const rows = [];
+        let failed = false;
         try {
           for (let i = 0; i < files.length; i++) {
             st.textContent = `✨ Foto ${i + 1} von ${files.length} wird ausgelesen … (dauert ca. 10–30 Sekunden)`;
-            const dataUrl = await this.prepareImage(files[i], 1800, false, true);
-            rows.push(...await this.geminiExtract(dataUrl));
+            const dataUrl = await this.prepareImage(files[i], 1600, false, true);
+            rows.push(...await this.geminiExtract(dataUrl, (t) => { st.textContent = `Foto ${i + 1} von ${files.length}: ${t}`; }));
           }
         } catch (e) {
           console.error(e);
+          failed = true;
           this.toast(e.userMessage || 'Das Auslesen hat nicht geklappt. Bitte Internetverbindung prüfen und nochmal versuchen.', 'error', null, 8000);
         } finally {
           st.textContent = '';
@@ -3411,7 +3413,7 @@ const DEFAULT_UNITS_MORE3 = [
         }
         const seen = new Set();
         const uniq = rows.filter(r => { const k = this.normAnswer(r.en) + '|' + this.normAnswer(r.de); if (seen.has(k)) return false; seen.add(k); return true; });
-        if (!uniq.length) { if (rows.length === 0 && !st.textContent) this.toast('Auf dem Foto wurden keine Vokabeln gefunden.', 'error'); return; }
+        if (!uniq.length) { if (!failed) this.toast('Auf dem Foto wurden keine Vokabeln gefunden.', 'error'); return; }
         this.suggestGerman(uniq);
         this.review = { rows: uniq, rawLines: uniq.map(r => r.en) };
         this.renderReview();
@@ -3422,48 +3424,71 @@ const DEFAULT_UNITS_MORE3 = [
 
       aiError(msg) { const e = new Error(msg); e.userMessage = msg; return e; },
 
-      async geminiCall(body) {
+      async geminiCall(body, onStatus = () => {}) {
         const s = this.state.settings;
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         const send = (model) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': s.aiKey },
           body: JSON.stringify(body)
         });
-        let res;
-        try { res = await send(s.aiModel || 'gemini-flash-latest'); }
-        catch (e) { throw this.aiError('Keine Internetverbindung. Die KI-Bilderkennung braucht Internet – offline bitte „Text scannen“ verwenden.'); }
-        if (res.status === 404) {
-          // Modellname veraltet → automatisch ein aktuelles Flash-Modell suchen
-          const m = await this.findGeminiModel();
-          if (m) { s.aiModel = m; this.save(false); res = await send(m); }
+        const busy = (st) => [500, 502, 503, 504].includes(st);
+        const models = [s.aiModel || 'gemini-flash-latest'];
+        let listed = false, lastStatus = 0;
+        // Google ist zeitweise überlastet (503): pro Modell 2 Versuche, danach bis zu 2 andere Modelle
+        for (let mi = 0; mi < models.length && mi < 3; mi++) {
+          const model = models[mi];
+          for (let attempt = 0; attempt < 2; attempt++) {
+            let res;
+            try { res = await send(model); }
+            catch (e) { throw this.aiError('Keine Internetverbindung. Die KI-Bilderkennung braucht Internet – offline bitte „Text scannen“ verwenden.'); }
+            if (res.ok) {
+              if (model !== s.aiModel) { s.aiModel = model; this.save(false); }
+              const data = await res.json();
+              const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
+              return parts.filter(p => p.text && !p.thought).map(p => p.text).join('');
+            }
+            lastStatus = res.status;
+            if (busy(res.status) && attempt === 0) {
+              onStatus('⏳ Google ist gerade ausgelastet – neuer Versuch in ein paar Sekunden …');
+              await sleep(4000);
+              continue;
+            }
+            if (busy(res.status) || res.status === 404) break;   // → nächstes Modell
+            let msg = '';
+            try { msg = ((await res.json()).error || {}).message || ''; } catch (_) {}
+            if (res.status === 400 && /api key|API_KEY/i.test(msg)) throw this.aiError('Der KI-Schlüssel ist ungültig. Bitte in den Einstellungen prüfen.');
+            if (res.status === 403) throw this.aiError('Der KI-Schlüssel hat keinen Zugriff. Bitte in den Einstellungen einen neuen Schlüssel eintragen.');
+            if (res.status === 429) throw this.aiError('Tageslimit oder zu viele Anfragen hintereinander. Bitte in ein paar Minuten (oder morgen) nochmal versuchen.');
+            throw this.aiError(`Die KI hat einen Fehler gemeldet (${res.status}). ${msg}`.trim());
+          }
+          if (!listed) {
+            listed = true;
+            (await this.listGeminiModels()).forEach(m => { if (!models.includes(m)) models.push(m); });
+          }
+          if (mi + 1 < Math.min(models.length, 3)) onStatus('⏳ Versuche ein anderes KI-Modell …');
         }
-        if (!res.ok) {
-          let msg = '';
-          try { msg = ((await res.json()).error || {}).message || ''; } catch (_) {}
-          if (res.status === 400 && /api key|API_KEY/i.test(msg)) throw this.aiError('Der KI-Schlüssel ist ungültig. Bitte in den Einstellungen prüfen.');
-          if (res.status === 403) throw this.aiError('Der KI-Schlüssel hat keinen Zugriff. Bitte in den Einstellungen einen neuen Schlüssel eintragen.');
-          if (res.status === 429) throw this.aiError('Zu viele Anfragen oder Tageslimit erreicht. Bitte in einer Minute (oder morgen) nochmal versuchen.');
-          throw this.aiError(`Die KI hat einen Fehler gemeldet (${res.status}). ${msg}`.trim());
-        }
-        const data = await res.json();
-        const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
-        return parts.filter(p => p.text && !p.thought).map(p => p.text).join('');
+        if (lastStatus === 404) throw this.aiError('Es wurde kein passendes KI-Modell gefunden. Bitte den Schlüssel in den Einstellungen neu testen.');
+        throw this.aiError('Google ist gerade überlastet (Fehler 503). Das liegt nicht an der App – bitte in ein paar Minuten nochmal versuchen.');
       },
 
-      async findGeminiModel() {
+      /** verfügbare Flash-Modelle, beste zuerst: stabile Flash → Flash-Lite → Vorschau-Versionen */
+      async listGeminiModels() {
         try {
           const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': this.state.settings.aiKey } });
-          if (!res.ok) return null;
-          const list = ((await res.json()).models || []).filter(m => (m.supportedGenerationMethods || []).includes('generateContent') && /flash/i.test(m.name));
-          const ver = (n) => (n.match(/(\d+(?:\.\d+)?)/) || [0, 0])[1] * 1;
-          const pick = (arr) => arr.sort((a, b) => ver(b.name) - ver(a.name))[0];
-          const stable = list.filter(m => !/(lite|image|tts|live|audio|embed|preview|exp|thinking|transcribe)/i.test(m.name));
-          const m = pick(stable) || pick(list.filter(m => !/(image|tts|live|audio|embed|transcribe)/i.test(m.name)));
-          return m ? m.name.replace(/^models\//, '') : null;
-        } catch (_) { return null; }
+          if (!res.ok) return [];
+          const all = ((await res.json()).models || [])
+            .filter(m => (m.supportedGenerationMethods || []).includes('generateContent') && /flash/i.test(m.name) && !/(image|tts|live|audio|embed|transcribe|agent|robotics)/i.test(m.name))
+            .map(m => m.name.replace(/^models\//, ''));
+          const ver = (n) => parseFloat((n.match(/(\d+(?:\.\d+)?)/) || [0, 0])[1]) || 0;
+          const rank = (n) => (/preview|exp/i.test(n) ? 2 : /lite/i.test(n) ? 1 : 0);
+          return all.sort((a, b) => rank(a) - rank(b) || ver(b) - ver(a));
+        } catch (_) { return []; }
       },
 
-      async geminiExtract(dataUrl) {
+      async findGeminiModel() { return (await this.listGeminiModels())[0] || null; },
+
+      async geminiExtract(dataUrl, onStatus) {
         const fill = this.state.settings.aiFill;
         const prompt = [
           'You extract English-German vocabulary from a photo of a page from an Austrian lower-secondary English textbook or workbook (e.g. MORE!).',
@@ -3495,7 +3520,7 @@ const DEFAULT_UNITS_MORE3 = [
             }
           }
         };
-        const text = await this.geminiCall(body);
+        const text = await this.geminiCall(body, onStatus);
         let arr;
         try { arr = JSON.parse(text.replace(/```(?:json)?/gi, '').trim()); }
         catch (e) { throw this.aiError('Die Antwort der KI war unvollständig. Bitte nochmal versuchen.'); }
@@ -3516,7 +3541,7 @@ const DEFAULT_UNITS_MORE3 = [
         s.aiKey = key;
         $('aiState').textContent = '⏳ Verbindung wird getestet …';
         try {
-          await this.geminiCall({ contents: [{ role: 'user', parts: [{ text: 'Reply with the single word OK.' }] }], generationConfig: { temperature: 0 } });
+          await this.geminiCall({ contents: [{ role: 'user', parts: [{ text: 'Reply with the single word OK.' }] }], generationConfig: { temperature: 0 } }, (t) => { $('aiState').textContent = t; });
           this.save(false);
           $('aiKeyInput').value = '';
           this.toast('✨ KI-Bilderkennung ist eingerichtet!');
